@@ -14,5 +14,156 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with irl. If not, see <http://www.gnu.org/licenses/>.
 
-require 'ncurses'
+require 'thread'
+require 'getoptlong'
+require 'ncursesw'
 require 'failirc/client'
+
+$version = '0.0.1'
+
+args = GetoptLong.new(
+    ['--version', '-v', GetoptLong::NO_ARGUMENT],
+    ['--config', '-f', GetoptLong::REQUIRED_ARGUMENT]
+)
+
+options = {
+    :config => "#{ENV['HOME']}/.irl/config",
+}
+
+args.each {|option, value|
+    case option
+
+    when '--version'
+        puts "irl #{$version}"
+        exit 0
+
+    when '--config'
+        options[:config] = value
+    end
+}
+
+class UI
+    class Window
+        class Buffer
+            attr_reader   :data
+            attr_accessor :position
+
+            def initialize
+                @data     = []
+                @position = 0
+            end
+        end
+
+        def initialize (window)
+            @window = window
+            self.focused = false
+        end
+
+        def puts (string, refresh=true)
+            @window.addstr "#{string}\n"
+
+            if refresh
+                self.refresh
+            end
+        end
+
+        def focused?
+            @focused
+        end
+
+        def focused= (value)
+            @focused = value
+
+            if value
+                @window.clear
+                @window.mvaddstr(0, 0, self.buffer(@window.getmaxy))
+                self.refresh
+            end
+        end
+
+        def buffer (lines)
+            @buffer
+        end
+
+        def refresh
+            @window.refresh
+        end
+    end
+
+    attr_reader   :client, :input, :output, :windows
+    attr_accessor :focused
+
+    def initialize (client)
+        @client = client
+
+        @input  = Ncurses::WINDOW.new(1, Ncurses.COLS, Ncurses.COLS - 1, 0)
+        @output = Ncurses::WINDOW.new(Ncurses.LINES - 1, Ncurses.COLS, 0, 0)
+
+        @input.nodelay true # remove blocking shit
+
+        @windows = []
+        self.focused = @windows.push(Window.new(@output)).last
+    end
+
+    def finalize
+    end
+
+    def start
+        loop do
+            value = self.readline
+
+            if value == 'q'
+                Process.exit! 0
+            end
+        end
+    end
+
+    def readline
+        focused.puts 'lol'
+
+        value = @input.getch
+
+        if value > 0
+            return value.chr
+        end
+    end
+end
+
+class Config
+    def initialize (path)
+        @doc = Document.new File.new path
+    end
+
+    def toClient
+        result = {}
+    end
+end
+
+$Config = Config.new(options[:config])
+$Client = IRC::Client.new $Config.toClient, false
+
+begin
+    Ncurses.initscr
+    Ncurses.raw    # provide unbuffered input
+    Ncurses.noecho # turn off input echoing
+    Ncurses.nonl   # turn off newline translation
+    
+    Ncurses.stdscr.intrflush false # turn off flush-on-interrupt
+    Ncurses.stdscr.keypad true     # turn on keypad mode     
+
+    $UI = UI.new($Client)
+    $UI.start
+rescue Exception => e
+    $error = e
+ensure
+    Ncurses.echo
+    Ncurses.noraw
+    Ncurses.nl
+    Ncurses.endwin
+
+    $stderr.puts "#{$error.class}: #{$error.message}\n\n"
+    $stderr.puts $error.backtrace.collect {|stack|
+        "#{stack}"
+    }.join("\n")
+
+end
