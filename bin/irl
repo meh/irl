@@ -94,66 +94,142 @@ class UI
         attr_reader   :window
         attr_accessor :utf8
 
+        @@symbols = {
+            :ALT       => 27,
+            :BACKSPACE => 127,
+
+            :ARROWS => {
+                :UP   => { :SHIFT => 527 },
+                :DOWN => { :SHIFT => 513 },
+            },
+        }
+
         def initialize (window)
             @window = window
             @utf8   = true
+
+            @window.keypad true
         end
 
-        def readchar
+        def readChar
             result = {
                 :ALT   => false,
                 :CTRL  => false,
                 :SHIFT => false,
-                :value => String.new,
+                :value => nil,
             }
-
-            result[:value].force_encoding('ASCII-8BIT')
 
             value = @window.getch
 
-            if value == 27
-                result[:ALT] = :LEFT
+            if value == @@symbols[:ALT]
+                result[:ALT] = true
 
                 value = @window.getch
             end
 
-            if value
-                if self.utf8
-                    case Input.bin(value)
+            if value <= 26
+                result[:CTRL] = true
+                value += 64
+            end
 
-                    when /^0/
-                        result[:value].concat(value)
+            case value
 
-                    when /^110/
-                        result[:value].concat(value)
-                        result[:value].concat(@window.getch)
-
-                    when /^1110/
-                        result[:value].concat(value)
-                        result[:value].concat(@window.getch)
-                        result[:value].concat(@window.getch)
-
-                    when /^11110/
-                        result[:value].concat(value)
-                        result[:value].concat(@window.getch)
-                        result[:value].concat(@window.getch)
-                        result[:value].concat(@window.getch)
-
-                    end
-
-                    result[:value].force_encoding('UTF-8')
-                else
-                    result[:value].concat(value)
+            when Ncurses::KEY_LEFT, Ncurses::KEY_SLEFT
+                if value == Ncurses::KEY_SLEFT
+                    result[:SHIFT] = true
                 end
+
+                result[:value] = :LEFT
+
+            when Ncurses::KEY_UP, @@symbols[:ARROWS][:UP][:SHIFT]
+                if value == @@symbols[:ARROWS][:UP][:SHIFT]
+                    result[:SHIFT] = true
+                end
+
+                result[:value] = :UP
+
+            when Ncurses::KEY_DOWN, @@symbols[:ARROWS][:DOWN][:SHIFT]
+                if value == @@symbols[:ARROWS][:UP][:SHIFT]
+                    result[:SHIFT] = true
+                end
+
+                result[:value] = :DOWN
+
+            when Ncurses::KEY_RIGHT, Ncurses::KEY_SRIGHT
+                if value == Ncurses::KEY_SRIGHT
+                    result[:SHIFT] = true
+                end
+
+                result[:value] = :RIGHT
+
+            when Ncurses::KEY_BACKSPACE, @@symbols[:BACKSPACE]
+                result[:value] = :BACKSPACE
+
+            when Ncurses::KEY_HOME, Ncurses::KEY_SHOME
+                if value == Ncurses::KEY_SHOME
+                    result[:SHIFT] = true
+                end
+
+                result[:value] = :HOME
+
+            when Ncurses::KEY_END, Ncurses::KEY_SEND
+                if value == Ncurses::KEY_SEND
+                    result[:SHIFT] = true
+                end
+
+                result[:value] = :END
+
+            when Ncurses::KEY_NPAGE
+                result[:value] = :PAGDOWN
+
+            when Ncurses::KEY_PPAGE
+                result[:value] = :PAGUP
+
+            when Ncurses::KEY_DC
+                result[:value] = :CANC
+
             else
-                result[:value] = nil
+                begin
+                    result[:value] = String.new
+                    result[:value].force_encoding('ASCII-8BIT')
+
+                    if self.utf8
+                        case Input.bin(value)
+
+                        when /^0/
+                            result[:value].concat(value)
+
+                        when /^110/
+                            result[:value].concat(value)
+                            result[:value].concat(@window.getch)
+
+                        when /^1110/
+                            result[:value].concat(value)
+                            result[:value].concat(@window.getch)
+                            result[:value].concat(@window.getch)
+
+                        when /^11110/
+                            result[:value].concat(value)
+                            result[:value].concat(@window.getch)
+                            result[:value].concat(@window.getch)
+                            result[:value].concat(@window.getch)
+
+                        end
+
+                        result[:value].force_encoding('UTF-8')
+                    else
+                        result[:value].concat(value)
+                    end
+                rescue
+                    result[:value] = nil
+                end
             end
 
             return result
         end
 
-        def readline
-            self.readchar
+        def readLine
+            self.readChar
         end
 
         def self.bin (n)
@@ -183,12 +259,12 @@ class UI
 
     def start
         loop do
-            char = @input.readchar
+            char = @input.readLine
 
             if char[:value] == 'q'
                 Process.exit! 0
             else
-                puts "#{char[:ALT] ? "ALT-#{char[:ALT].to_s} " : ''}#{char[:value]}"
+                puts "#{char[:CTRL] ? 'CTRL ' : ''}#{char[:ALT] ? 'ALT ' : ''}#{char[:SHIFT] ? 'SHIFT ' : ''}#{char[:value]}"
             end
         end
     end
