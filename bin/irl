@@ -90,19 +90,92 @@ class UI
         end
     end
 
-    attr_reader   :client, :input, :output, :windows
+    class Input
+        attr_reader   :window
+        attr_accessor :utf8
+
+        def initialize (window)
+            @window = window
+            @utf8   = true
+        end
+
+        def readchar
+            result = {
+                :ALT   => false,
+                :CTRL  => false,
+                :SHIFT => false,
+                :value => String.new,
+            }
+
+            result[:value].force_encoding('ASCII-8BIT')
+
+            value = @window.getch
+
+            if value == 27
+                result[:ALT] = :LEFT
+
+                value = @window.getch
+            end
+
+            if value
+                if self.utf8
+                    case Input.bin(value)
+
+                    when /^0/
+                        result[:value].concat(value)
+
+                    when /^110/
+                        result[:value].concat(value)
+                        result[:value].concat(@window.getch)
+
+                    when /^1110/
+                        result[:value].concat(value)
+                        result[:value].concat(@window.getch)
+                        result[:value].concat(@window.getch)
+
+                    when /^11110/
+                        result[:value].concat(value)
+                        result[:value].concat(@window.getch)
+                        result[:value].concat(@window.getch)
+                        result[:value].concat(@window.getch)
+
+                    end
+
+                    result[:value].force_encoding('UTF-8')
+                else
+                    result[:value].concat(value)
+                end
+            else
+                result[:value] = nil
+            end
+
+            return result
+        end
+
+        def readline
+            self.readchar
+        end
+
+        def self.bin (n)
+            [n].pack('C').unpack('B8')[0]
+        end
+    end
+
+    attr_reader   :client, :raw, :input, :windows
     attr_accessor :focused
 
     def initialize (client)
         @client = client
 
-        @input  = Ncurses::WINDOW.new(1, Ncurses.COLS, Ncurses.COLS - 1, 0)
-        @output = Ncurses::WINDOW.new(Ncurses.LINES - 1, Ncurses.COLS, 0, 0)
+        @raw = {
+            :input  => Ncurses::WINDOW.new(1, Ncurses.COLS, Ncurses.COLS - 1, 0),
+            :output => Ncurses::WINDOW.new(Ncurses.LINES - 1, Ncurses.COLS, 0, 0),
+        }
 
-        @input.nodelay true # remove blocking shit
+        @input = Input.new(@raw[:input])
 
         @windows = []
-        self.focused = @windows.push(Window.new(@output)).last
+        self.focused = @windows.push(Window.new(@raw[:output])).last
     end
 
     def finalize
@@ -110,22 +183,18 @@ class UI
 
     def start
         loop do
-            value = self.readline
+            char = @input.readchar
 
-            if value == 'q'
+            if char[:value] == 'q'
                 Process.exit! 0
+            else
+                puts "#{char[:ALT] ? "ALT-#{char[:ALT].to_s} " : ''}#{char[:value]}"
             end
         end
     end
 
-    def readline
-        focused.puts 'lol'
-
-        value = @input.getch
-
-        if value > 0
-            return value.chr
-        end
+    def puts (*args)
+        self.focused.puts *args
     end
 end
 
