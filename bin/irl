@@ -128,11 +128,23 @@ class UI
             end
 
             if value <= 26
-                result[:CTRL] = true
-                value += 64
+                if value == 10
+                    value = :ENTER
+                elsif value == 9
+                    value = :TAB
+                else
+                    result[:CTRL] = true
+                    value += 64
+                end
             end
 
             case value
+
+            when Ncurses::KEY_ENTER, :ENTER
+                result[:value] = :ENTER
+
+            when :TAB
+                result[:value] = :TAB
 
             when Ncurses::KEY_LEFT, Ncurses::KEY_SLEFT
                 if value == Ncurses::KEY_SLEFT
@@ -230,6 +242,11 @@ class UI
 
         def readLine
             self.readChar
+        end
+
+        def put (value)
+            @window.addstr value
+            @window.refresh
         end
 
         def self.bin (n)
