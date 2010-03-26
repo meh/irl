@@ -54,7 +54,10 @@ class UI
             end
         end
 
-        def initialize (window)
+        attr_reader :UI
+
+        def initialize (ui, window)
+            @UI     = ui
             @window = window
             self.focused = false
         end
@@ -65,6 +68,8 @@ class UI
             if refresh
                 self.refresh
             end
+
+            @UI.input.focus!
         end
 
         def focused?
@@ -91,7 +96,7 @@ class UI
     end
 
     class Input
-        attr_reader   :window
+        attr_reader   :window, :UI
         attr_accessor :utf8
 
         @@symbols = {
@@ -104,11 +109,35 @@ class UI
             },
         }
 
-        def initialize (window)
-            @window = window
-            @utf8   = true
+        def initialize (ui, window)
+            @UI       = ui
+            @window   = window
+            @utf8     = true
+
+            @current = 0
 
             @window.keypad true
+
+            @UI.observe :enter, lambda {|string|
+                $UI.puts string.inspect
+
+                if match = string.match(/^\/([^ ]+)(\s+(.*))?$/)
+                    $UI.fire(match[1], match[3])
+                end
+            }
+
+            @UI.observe 'quit', lambda {|message|
+                Process.exit! 0
+            }
+        end
+
+        def position
+            { :x => @window.getbegx, :y => @window.getbegy }
+        end
+
+        def focus!
+            @window.move Ncurses.COLS - 1, @current
+            @window.refresh
         end
 
         def readChar
@@ -241,7 +270,24 @@ class UI
         end
 
         def readLine
-            self.readChar
+            line = String.new
+
+            @UI.puts self.position.inspect
+
+            while char = self.readChar
+                # $UI.puts "#{char[:CTRL] ? 'CTRL ' : ''}#{char[:ALT] ? 'ALT ' : ''}#{char[:SHIFT] ? 'SHIFT ' : ''}#{char[:value]}"
+
+                if char[:value].is_a?(String) && !char[:ALT] && !char[:CTRL]
+                    line << char[:value]
+                else
+                    if char[:value] == :ENTER
+                        @UI.fire(:enter, line)
+                        line = String.new
+                    end
+                end
+            end
+
+            return line
         end
 
         def put (value)
@@ -260,15 +306,19 @@ class UI
     def initialize (client)
         @client = client
 
+        @events   = {}
+        @queue    = Queue.new
+        @handling = false
+
         @raw = {
             :input  => Ncurses::WINDOW.new(1, Ncurses.COLS, Ncurses.COLS - 1, 0),
             :output => Ncurses::WINDOW.new(Ncurses.LINES - 1, Ncurses.COLS, 0, 0),
         }
 
-        @input = Input.new(@raw[:input])
-
         @windows = []
-        self.focused = @windows.push(Window.new(@raw[:output])).last
+        self.focused = @windows.push(Window.new(self, @raw[:output])).last
+
+        @input = Input.new(self, @raw[:input])
     end
 
     def finalize
@@ -276,18 +326,57 @@ class UI
 
     def start
         loop do
-            char = @input.readLine
+            string = @input.readLine
 
-            if char[:value] == 'q'
+            if string == 'q'
                 Process.exit! 0
             else
-                puts "#{char[:CTRL] ? 'CTRL ' : ''}#{char[:ALT] ? 'ALT ' : ''}#{char[:SHIFT] ? 'SHIFT ' : ''}#{char[:value]}"
             end
         end
     end
 
     def puts (*args)
         self.focused.puts *args
+    end
+
+    def observe (name, callback)
+        if !@events[name]
+            @events[name] = []
+        end
+
+        @events[name].push(callback)
+    end
+
+    def fire (name, *args)
+        @queue.push({ :name => name, :arguments => args })
+
+        if @handling
+            return
+        end
+
+        self.handle
+    end
+
+    def handle
+        @handling = true
+
+        Thread.new {
+            while event = @queue.pop rescue nil
+                if !@events[event[:name]]
+                    next
+                end
+
+                @events[event[:name]].each {|callback|
+                    begin
+                        callback.call(*event[:arguments])
+                    rescue Exception => e
+                        self.debug e
+                    end
+                }
+            end
+
+            @handling = false
+        }
     end
 end
 
@@ -309,9 +398,6 @@ begin
     Ncurses.raw    # provide unbuffered input
     Ncurses.noecho # turn off input echoing
     Ncurses.nonl   # turn off newline translation
-    
-    Ncurses.stdscr.intrflush false # turn off flush-on-interrupt
-    Ncurses.stdscr.keypad true     # turn on keypad mode     
 
     $UI = UI.new($Client)
     $UI.start
@@ -323,9 +409,5 @@ ensure
     Ncurses.nl
     Ncurses.endwin
 
-    $stderr.puts "#{$error.class}: #{$error.message}\n\n"
-    $stderr.puts $error.backtrace.collect {|stack|
-        "#{stack}"
-    }.join("\n")
-
+    self.debug $error
 end
