@@ -114,7 +114,8 @@ class UI
             @window   = window
             @utf8     = true
 
-            @current = 0
+            @cursor = 0
+            @data   = String.new
 
             @window.keypad true
 
@@ -136,7 +137,7 @@ class UI
         end
 
         def focus!
-            @window.move Ncurses.COLS - 1, @current
+            @window.move 0, @cursor
             @window.refresh
         end
 
@@ -272,17 +273,25 @@ class UI
         def readLine
             line = String.new
 
-            @UI.puts self.position.inspect
-
             while char = self.readChar
                 # $UI.puts "#{char[:CTRL] ? 'CTRL ' : ''}#{char[:ALT] ? 'ALT ' : ''}#{char[:SHIFT] ? 'SHIFT ' : ''}#{char[:value]}"
 
                 if char[:value].is_a?(String) && !char[:ALT] && !char[:CTRL]
-                    line << char[:value]
+                    line << self.put(char[:value])
+
+                    @cursor += 1
                 else
-                    if char[:value] == :ENTER
+                    case char[:value]
+
+                    when :ENTER
                         @UI.fire(:enter, line)
+
+                        @data.clear
                         line = String.new
+                        @cursor = 0
+
+                    when :BACKSPACE
+
                     end
                 end
             end
@@ -291,8 +300,17 @@ class UI
         end
 
         def put (value)
-            @window.addstr value
-            @window.refresh
+            @data.insert(@cursor, value)
+            self.refresh
+
+            return value
+        end
+
+        def refresh
+            position = self.position
+
+            @window.mvaddstr(position[:y], position[:x], @data)
+            @window.move(0, @cursor+1)
         end
 
         def self.bin (n)
